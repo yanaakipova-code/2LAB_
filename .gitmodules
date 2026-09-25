@@ -1,0 +1,12 @@
+[submodule "extern/googletest"]
+	path = extern/googletest
+	url = https://github.com/google/googletest.git
+[submodule "build/extern/benchmark"]
+	path = build/extern/benchmark
+	url = https://github.com/google/benchmark.git
+[submodule "extern/benchmark"]
+	path = extern/benchmark
+	url = https://github.com/google/benchmark.git
+[submodule "structures"]
+	path = structures
+	url = https://github.com/yanaakipova-code/lab2-3.git
