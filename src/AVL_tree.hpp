@@ -212,5 +212,11 @@ public:
 
         --m_count;
     }
-
+    V& get_ref_by_key(const K& key){ 
+        Node<K, V> node = find_node(m_root, key);
+        if(node == nullptr){
+            throw null_ptr("Ключ не найден");
+        }
+        return node->m_value;
+    }
 };
