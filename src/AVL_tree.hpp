@@ -3,19 +3,9 @@
 #include <memory>
 #include "add_fun.hpp"
 #include "error.hpp"
+#include "avl_node.hpp"
+#include "avl_iterator.hpp"
 
-
-template<typename K, typename V>
-struct Node{
-    K m_key;
-    V m_value;
-    std::shared_ptr<Node> m_left;
-    std::shared_ptr<Node> m_right;
-    int m_height;
-
-    Node(const K& key, const V& value): m_key{key}, m_value{value},
-        m_left{nullptr}, m_right{nullptr}, m_height{1} {}
-};
 
 template<typename K, typename V>
 class avl_tree: public idictionary<K,V>{
@@ -66,9 +56,9 @@ private:
         std::shared_ptr<Node<K,V>> B = std::move(b->m_left);
 
         b->m_left = std::move(a);
-        b->m_left->m_right = std::move(B);   // ← ИСПРАВЛЕНО
+        b->m_left->m_right = std::move(B);
 
-        update_height(b->m_left.get());       // ← ИСПРАВЛЕНО
+        update_height(b->m_left.get());
         update_height(b.get());
 
         return b;
@@ -213,10 +203,18 @@ public:
         --m_count;
     }
     V& get_ref_by_key(const K& key){ 
-        Node<K, V> node = find_node(m_root, key);
+        std::shared_ptr<Node<K, V>> node = find_node(m_root, key); 
         if(node == nullptr){
             throw null_ptr("Ключ не найден");
         }
         return node->m_value;
+    }
+
+    avl_iterator<K, V> begin(){
+        return avl_iterator<K,V>(m_root);
+    }
+
+    avl_iterator<K,V> end(){
+        return avl_iterator<K,V>(nullptr);
     }
 };
