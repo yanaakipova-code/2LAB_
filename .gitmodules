@@ -10,3 +10,6 @@
 [submodule "structures"]
 	path = structures
 	url = https://github.com/yanaakipova-code/lab2-3.git
+[submodule "libs/wxWidgets"]
+	path = libs/wxWidgets
+	url = https://github.com/wxWidgets/wxWidgets.git
