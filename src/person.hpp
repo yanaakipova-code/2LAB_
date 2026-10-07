@@ -53,14 +53,29 @@ public:
         return std::format("{} {} {}", m_last_name, m_first_name, m_patronymic);
     }
 
-    size_t get_age() const {
+    std::size_t get_age() const {
         std::time_t now = std::time(nullptr);
 
-        std::tm* b = std::localtime(&m_date);
-        std::tm* t = std::localtime(&now);
+        const std::tm* pb = std::localtime(&m_date);
+        if(pb == nullptr){
+            return 0;
+        }
+        std::tm b = *pb;
 
-        std::size_t age = t->tm_year - b->tm_year;
+        const std::tm* pt = std::localtime(&now);
+        if(pt == nullptr){
+            return 0;
+        }
+        std::tm t = *pt;
 
-        return age;
+        int age = t.tm_year - b.tm_year;
+        if(t.tm_mon < b.tm_mon || (t.tm_mon == b.tm_mon && t.tm_mday < b.tm_mday)){
+            --age;
+        }
+        if (age < 0) {
+            return 0;
+        } else {
+            return static_cast<std::size_t>(age);
+        }
     }
 };
