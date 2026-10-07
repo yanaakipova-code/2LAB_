@@ -130,7 +130,7 @@ private:
         for(;node->m_left != nullptr;){
             node = node->m_left;
         }
-        return  node;
+        return node;
     }
 
     std::shared_ptr<Node<K, V>> remove_node(std::shared_ptr<Node<K, V>> node, const K& key){
