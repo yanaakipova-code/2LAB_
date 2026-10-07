@@ -1,4 +1,6 @@
 #pragma once
+#include <cmath>
+#include <cstddef>
 #include "AVL_tree.hpp"
 #include "range_static.hpp"
 #include "../structures/ArraySequence.hpp"
@@ -13,12 +15,11 @@ private:
     bool m_uniform;
     ArraySequence<T> m_boundaries;
 
-
     T get_bin_key(const T& value) const{
         if(m_uniform){
-            T offset = value - m_min;
-            T bin_index = offset / m_step;
-            return m_min + bin_index * m_step;
+            double idx = std::floor(static_cast<double>(value - m_min) /
+                                    static_cast<double>(m_step));
+            return m_min + static_cast<T>(idx) * m_step;
         }else{
             for(std::size_t i = 0; i + 1 < m_boundaries.GetLength(); ++i) {
                 T lower = m_boundaries.Get(i);
@@ -26,31 +27,9 @@ private:
                 if(lower <= value && upper > value){
                     return lower;
                 }
-
             }
-            return m_boundaries.Get(m_boundaries.GetLength() - 1); 
+            return m_boundaries.Get(m_boundaries.GetLength() - 1);
         }
-    }
-
-    ArraySequence<T> get_bin_keys() const{
-        ArraySequence<T> keys;
-
-        if(m_uniform){
-            T key = m_min;
-            while(key < m_max){
-                if(m_bins.contains_key(key)){
-                    keys.Append(key);
-                }
-                key+=m_step;
-            }
-        }else{
-            for(const auto& key: m_boundaries){
-                if(m_bins.contains_key(key)){
-                    keys.Append(key);
-                }
-            }
-        }
-        return keys;
     }
 
 public:
@@ -72,6 +51,29 @@ public:
         }
     }
 
+    ArraySequence<T> get_bin_keys() const{
+        ArraySequence<T> keys;
+
+        if(m_uniform){
+            std::size_t n = static_cast<std::size_t>(
+                std::ceil(static_cast<double>(m_max - m_min) / static_cast<double>(m_step)));
+            for(std::size_t i = 0; i < n; ++i){
+                T key = m_min + static_cast<T>(i) * m_step;
+                if(m_bins.contains_key(key)){
+                    keys.Append(key);
+                }
+            }
+        }else{
+            for(std::size_t i = 0; i < m_boundaries.GetLength(); ++i){
+                T key = m_boundaries.Get(i);
+                if(m_bins.contains_key(key)){
+                    keys.Append(key);
+                }
+            }
+        }
+        return keys;
+    }
+
     range_static<T> get_bin(const T& key) const {
         return m_bins.get_elem_by_key(key);
     }
@@ -81,6 +83,4 @@ public:
     T get_max() const { return m_max; }
     T get_step() const { return m_step; }
     bool is_uniform() const { return m_uniform; }
-
-
 };
