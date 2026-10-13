@@ -1,86 +1,69 @@
 #pragma once
 #include <cmath>
+#include <concepts>
+#include <type_traits>
 #include <cstddef>
 #include "AVL_tree.hpp"
 #include "range_static.hpp"
 #include "../structures/ArraySequence.hpp"
+#include "section.hpp"
+
 
 template<typename T>
 class histogram{
 private:
-    avl_tree<T, range_static<T>> m_bins;
-    T m_min;
-    T m_max;
-    T m_step;
-    bool m_uniform;
-    ArraySequence<T> m_boundaries;
-
-    T get_bin_key(const T& value) const{
-        if(m_uniform){
-            double idx = std::floor(static_cast<double>(value - m_min) /
-                                    static_cast<double>(m_step));
-            return m_min + static_cast<T>(idx) * m_step;
-        }else{
-            for(std::size_t i = 0; i + 1 < m_boundaries.GetLength(); ++i) {
-                T lower = m_boundaries.Get(i);
-                T upper = m_boundaries.Get(i+1);
-                if(lower <= value && upper > value){
-                    return lower;
-                }
-            }
-            return m_boundaries.Get(m_boundaries.GetLength() - 1);
-        }
-    }
+    avl_tree<std::size_t, range_statistic<T>> m_bins;
+    selection_histogram<T> m_sections;
 
 public:
-    histogram(T min, T max, T step): m_min{min}, m_max{max}, m_step{step}, m_uniform{true} {}
-    histogram(const ArraySequence<T>& boundaries):
-        m_min{boundaries.Get(0)},
-        m_max{boundaries.Get(boundaries.GetLength() - 1)},
-        m_step{0}, m_uniform{false}, m_boundaries{boundaries} {}
+     histogram(const selection_histogram<T>& sections): m_sections(sections) {}
 
-    void add(const T& value){
-        T key = get_bin_key(value);
-        if(m_bins.contains_key(key)){
-            range_static<T>& stat = m_bins.get_ref_by_key(key);
-            stat.add(value);
-        } else {
-            range_static<T> stats;
-            stats.add(value);
-            m_bins.add(key, stats);
+    histogram(T min, T max, T step): histogram(selection_histogram<T>::uniform(min, max, step)) {}
+    histogram(const ArraySequence<T>& boundaries): histogram(selection_histogram<T>::uneven(boundaries)) {}
+
+    bool add(const T& value){
+        const std::size_t index = m_sections.find_bin(value);
+        if(index == selection_histogram<T>::no_position){
+            return false;
         }
-    }
 
-    ArraySequence<T> get_bin_keys() const{
-        ArraySequence<T> keys;
-
-        if(m_uniform){
-            std::size_t n = static_cast<std::size_t>(
-                std::ceil(static_cast<double>(m_max - m_min) / static_cast<double>(m_step)));
-            for(std::size_t i = 0; i < n; ++i){
-                T key = m_min + static_cast<T>(i) * m_step;
-                if(m_bins.contains_key(key)){
-                    keys.Append(key);
-                }
-            }
+        if(m_bins.contains_key(index)){
+            m_bins.get_ref_by_key(index).add(value);
         }else{
-            for(std::size_t i = 0; i < m_boundaries.GetLength(); ++i){
-                T key = m_boundaries.Get(i);
-                if(m_bins.contains_key(key)){
-                    keys.Append(key);
-                }
-            }
+            range_statistic<T> stats;
+            stats.add(value);
+            m_bins.add(index, stats);
         }
-        return keys;
+        return true;
     }
 
-    range_static<T> get_bin(const T& key) const {
-        return m_bins.get_elem_by_key(key);
+    range_statistic<T> get_bin(std::size_t index) const{
+        if(index >= m_sections.get_bin_count()){
+            throw no_find("Номер интервала вне диапазона");
+        }
+        if(!(has_data(index))){
+            return range_statistic<T>();
+        }
+        return m_bins.get_elem_by_key(index);
     }
 
-    std::size_t get_bin_count() const { return m_bins.get_count(); }
-    T get_min() const { return m_min; }
-    T get_max() const { return m_max; }
-    T get_step() const { return m_step; }
-    bool is_uniform() const { return m_uniform; }
+    bool has_data(std::size_t index) const{
+        return m_bins.contains_key(index);
+    }
+
+    const selection_histogram<T>& get_selection() const{
+        return m_sections;
+    }
+    
+    
+    std::size_t get_bin_count() const{
+        return m_sections.get_bin_count();
+    }
+    T get_min() const {
+        return m_sections.get_min();
+    }
+
+    T get_max() const{
+        return m_sections.get_max();
+    }
 };
