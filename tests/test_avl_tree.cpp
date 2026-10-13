@@ -2,6 +2,7 @@
 #include "AVL_tree.hpp"
 #include "error.hpp"
 #include "avl_iterator.hpp"
+#include "../structures/ArraySequence.hpp"
 
 TEST(AVLTreeTest, EmptyTree) {
     avl_tree<int, int> tree;
@@ -79,3 +80,31 @@ TEST(AVLIteratorTest, OneElement) {
     ++it;
     EXPECT_EQ(it, tree.end());
 }
+
+TEST(AVLIteratorTest, ThreeElements) {
+    avl_tree<int, int> tree;
+    tree.add(50, 500);
+    tree.add(30, 300);
+    tree.add(70, 700);
+    tree.add(20, 200);
+    tree.add(40, 400);
+
+    ArraySequence<int> result;
+    for (auto it = tree.begin(); it != tree.end(); ++it) {
+        result.Append(*it);
+    }
+
+    ArraySequence<int> expected;
+    expected.Append(200);
+    expected.Append(300);
+    expected.Append(400);
+    expected.Append(500);
+    expected.Append(700);
+
+    EXPECT_EQ(result.GetLength(), expected.GetLength());
+
+    for (std::size_t i = 0; i < result.GetLength(); ++i) {
+        EXPECT_EQ(result.Get(i), expected.Get(i));
+    }
+}
+
