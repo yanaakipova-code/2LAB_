@@ -4,7 +4,7 @@
 #include "bubble_sort.hpp"
 
 template<typename T>
-struct range_static{
+struct range_statistic{
     std::size_t m_count = 0;
     double m_summ{};
     double m_seq_summ{};
@@ -63,4 +63,13 @@ struct range_static{
     }
 
 
+};
+
+template<typename T>
+struct count_statistic{
+    std::size_t m_count = 0;
+
+    void add(const T&){
+        ++m_count;
+    }
 };
