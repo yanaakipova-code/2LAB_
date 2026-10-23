@@ -18,6 +18,18 @@ private:
     std::string m_patronymic;
     std::time_t m_date;
 
+    static std::time_t date_from_age(int age){
+        std::time_t now = std::time(nullptr);
+        std::tm t = *std::localtime(&now);
+        t.tm_year -= age;
+        t.tm_mon  = 0;
+        t.tm_mday = 1;
+        t.tm_hour = 0;
+        t.tm_min  = 0;
+        t.tm_sec  = 0;
+        return std::mktime(&t);
+    }
+
 public:
     person():m_first_name{""}, m_last_name{""}, 
             m_patronymic{""}, m_date{0},m_passport{} {}
@@ -26,6 +38,11 @@ public:
             const std::string& patronymic, const std::time_t& date):m_passport{id},
             m_first_name{first_name}, m_last_name{last_name}, m_patronymic{patronymic},
             m_date{date} {}
+
+     person(const person_id& id, const std::string& first_name, const std::string& last_name, 
+            const std::string& patronymic, int age):m_passport{id},
+            m_first_name{first_name}, m_last_name{last_name}, m_patronymic{patronymic},
+            m_date{date_from_age(age)} {}
     person(const person& other) = default;
 
     std::string get_first_name() const{

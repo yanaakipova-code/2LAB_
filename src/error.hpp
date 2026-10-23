@@ -25,3 +25,14 @@ class no_find: public exception{
 public:
     no_find(const char* message) : exception(message) {}
 };
+
+class length_arr: public exception{
+public:
+    length_arr(const char* message) : exception(message) {}
+};
+
+class invalid_range: public exception{
+public:
+    invalid_range(const char* message) : exception(message) {}
+};
+
