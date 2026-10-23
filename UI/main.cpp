@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cmath>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <random>
 #include <string>
@@ -27,6 +28,7 @@ static wxString from_std(const std::string& s){ return wxString::FromUTF8(s.c_st
 static std::string to_std(const wxString& s){ return std::string(s.utf8_str()); }
 
 static wxString num_to_str(double v) { return wxString::Format("%g", v); }
+static wxString size_to_str(std::size_t v) { return wxString::Format("%lu", (unsigned long)v); }
 
 static void show_error(const wxString& text) {
     wxMessageBox(text, to_utf8("Ошибка"), wxICON_WARNING);
@@ -44,6 +46,29 @@ static bool parse_many(const wxString& text, ArraySequence<double>& result, wxSt
         wxString word = tokens.GetNextToken();
         double value = 0;
         if (!word.ToCDouble(&value)) {
+            bad = word;
+            return false;
+        }
+        result.Append(value);
+    }
+    return true;
+}
+
+static bool parse_size(wxString text, std::size_t& result) {
+    text.Trim(true).Trim(false);
+    if (text.empty() || text[0] == '-') return false;
+    unsigned long value = 0;
+    if (!text.ToULong(&value)) return false;
+    result = static_cast<std::size_t>(value);
+    return true;
+}
+
+static bool parse_sizes(const wxString& text, ArraySequence<std::size_t>& result, wxString& bad) {
+    wxStringTokenizer tokens(text, " \t\r\n;,");
+    while (tokens.HasMoreTokens()) {
+        wxString word = tokens.GetNextToken();
+        std::size_t value = 0;
+        if (!parse_size(word, value)) {
             bad = word;
             return false;
         }
@@ -143,7 +168,8 @@ private:
 
 class people_panel : public wxPanel {
 public:
-    people_panel(wxWindow* parent) : wxPanel(parent) {
+    people_panel(wxWindow* parent, ArraySequence<person>* persons)
+        : wxPanel(parent), m_persons(persons) {
         auto* add_box = new wxStaticBoxSizer(wxVERTICAL, this, to_utf8("Добавить человека"));
         wxWindow* add_parent = add_box->GetStaticBox();
 
@@ -207,11 +233,24 @@ public:
         add_button->Bind(wxEVT_BUTTON, &people_panel::on_add, this);
         find_button->Bind(wxEVT_BUTTON, &people_panel::on_find, this);
         m_query->Bind(wxEVT_TEXT_ENTER, &people_panel::on_find, this);
+
+        rebuild_index();
+        show_all_persons();
+    }
+
+    void set_on_changed(std::function<void()> callback) { m_on_changed = std::move(callback); }
+
+    void refresh() {
+        rebuild_index();
+        show_all_persons();
+        m_status->SetLabel(to_utf8("Всего людей: ") +
+                           wxString::Format("%lu", (unsigned long)m_persons->GetLength()));
     }
 
 private:
-    ArraySequence<person> m_persons;
+    ArraySequence<person>* m_persons;
     person_index m_index;
+    std::function<void()> m_on_changed;
 
     wxTextCtrl *m_series, *m_number, *m_last, *m_first, *m_patr, *m_query;
     wxDatePickerCtrl* m_date;
@@ -244,13 +283,13 @@ private:
 
     void rebuild_index() {
         m_index = person_index();
-        m_index.build(m_persons);
+        m_index.build(*m_persons);
     }
 
     void show_all_persons() {
         m_all->DeleteAllItems();
-        for (std::size_t i = 0; i < m_persons.GetLength(); ++i) {
-            add_row(m_all, i, m_persons.Get(i));
+        for (std::size_t i = 0; i < m_persons->GetLength(); ++i) {
+            add_row(m_all, i, m_persons->Get(i));
         }
     }
 
@@ -270,8 +309,8 @@ private:
             return;
         }
 
-        for (std::size_t i = 0; i < m_persons.GetLength(); ++i) {
-            person_id id = m_persons.Get(i).get_passport();
+        for (std::size_t i = 0; i < m_persons->GetLength(); ++i) {
+            person_id id = m_persons->Get(i).get_passport();
             if (id.series == series && id.number == number) {
                 show_error(to_utf8("Человек с таким паспортом уже есть."));
                 return;
@@ -283,12 +322,14 @@ private:
             person p(id, to_std(first), to_std(last), to_std(patr),
                      static_cast<std::time_t>(m_date->GetValue().GetTicks()));
 
-            m_persons.Append(p);
+            m_persons->Append(p);
             rebuild_index();
             show_all_persons();
 
             m_status->SetLabel(to_utf8("Добавлено. Всего людей: ") +
-                               wxString::Format("%lu", (unsigned long)m_persons.GetLength()));
+                               wxString::Format("%lu", (unsigned long)m_persons->GetLength()));
+
+            if (m_on_changed) m_on_changed();
         } catch (const exception& e) {
             show_error(from_std(e.what()));
         } catch (const std::exception& e) {
@@ -462,7 +503,8 @@ private:
                     show_error(to_utf8("Слишком много интервалов (максимум 1000)."));
                     return;
                 }
-                m_hist = std::make_unique<histogram<double>>(lo, hi, step);
+                m_hist = std::make_unique<histogram<double>>(
+                    histogram<double>::make_histogram(lo, hi, step));
             } else {
                 ArraySequence<double> bounds;
                 wxString bad;
@@ -474,7 +516,8 @@ private:
                     show_error(to_utf8("Слишком много границ (максимум 1000)."));
                     return;
                 }
-                m_hist = std::make_unique<histogram<double>>(bounds);
+                m_hist = std::make_unique<histogram<double>>(
+                    histogram<double>::make_histogram(bounds));
             }
 
             m_status->SetLabel(to_utf8("Гистограмма создана."));
@@ -602,17 +645,331 @@ private:
 };
 
 
+class people_histogram_panel : public wxPanel {
+public:
+    people_histogram_panel(wxWindow* parent, ArraySequence<person>* persons)
+        : wxPanel(parent), m_persons(persons) {
+        auto* param_box = new wxStaticBoxSizer(wxVERTICAL, this, to_utf8("Параметры гистограммы"));
+        wxWindow* param_parent = param_box->GetStaticBox();
+
+        wxArrayString params;
+        params.Add(to_utf8("Возраст"));
+        params.Add(to_utf8("Год рождения"));
+        m_param = new wxChoice(param_parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, params);
+        m_param->SetSelection(0);
+
+        wxArrayString modes;
+        modes.Add(to_utf8("Равные интервалы"));
+        modes.Add(to_utf8("Свои границы"));
+        m_mode = new wxRadioBox(param_parent, wxID_ANY, to_utf8("Режим"), wxDefaultPosition,
+                                wxDefaultSize, modes, 1, wxRA_SPECIFY_COLS);
+
+        m_min = new wxTextCtrl(param_parent, wxID_ANY);
+        m_max = new wxTextCtrl(param_parent, wxID_ANY);
+        m_step = new wxTextCtrl(param_parent, wxID_ANY);
+        m_bounds = new wxTextCtrl(param_parent, wxID_ANY);
+
+        auto* grid = new wxFlexGridSizer(2, 5, 5);
+        grid->AddGrowableCol(1);
+        add_field(grid, param_parent, "Параметр", m_param);
+        add_field(grid, param_parent, "Мин", m_min);
+        add_field(grid, param_parent, "Макс", m_max);
+        add_field(grid, param_parent, "Шаг", m_step);
+        add_field(grid, param_parent, "Границы", m_bounds);
+
+        m_auto = new wxCheckBox(param_parent, wxID_ANY,
+                                to_utf8("Обновлять при добавлении людей"));
+        m_auto->SetValue(true);
+
+        auto* build_button = new wxButton(param_parent, wxID_ANY, to_utf8("Построить гистограмму"));
+
+        param_box->Add(m_mode, 0, wxEXPAND | wxALL, 5);
+        param_box->Add(grid, 0, wxEXPAND | wxALL, 5);
+        param_box->Add(m_auto, 0, wxEXPAND | wxALL, 5);
+        param_box->Add(build_button, 0, wxALIGN_RIGHT | wxALL, 5);
+
+        auto* create_box = new wxStaticBoxSizer(wxVERTICAL, this, to_utf8("Создать гистограмму"));
+        wxWindow* create_parent = create_box->GetStaticBox();
+        auto* create_text = new wxStaticText(create_parent, wxID_ANY,
+            to_utf8("Добавит в общий список 10 разных людей\n"
+                    "(Иванов Иван Иванович и др.) с разными\n"
+                    "годами рождения и построит гистограмму."));
+        auto* create_button = new wxButton(create_parent, wxID_ANY,
+                                           to_utf8("Создать гистограмму (10 человек)"));
+        create_box->Add(create_text, 0, wxALL, 5);
+        create_box->Add(create_button, 0, wxALIGN_RIGHT | wxALL, 5);
+
+        m_info = new wxStaticText(this, wxID_ANY, "");
+
+        auto* left = new wxBoxSizer(wxVERTICAL);
+        left->Add(create_box, 0, wxEXPAND | wxALL, 5);
+        left->Add(param_box, 0, wxEXPAND | wxALL, 5);
+        left->Add(m_info, 0, wxEXPAND | wxALL, 10);
+
+        m_chart = new chart_panel(this);
+        m_status = new wxStaticText(this, wxID_ANY, to_utf8("Нажмите «Построить гистограмму»."));
+
+        auto* right = new wxBoxSizer(wxVERTICAL);
+        right->Add(m_chart, 1, wxEXPAND | wxALL, 5);
+        right->Add(m_status, 0, wxEXPAND | wxALL, 5);
+
+        auto* root = new wxBoxSizer(wxHORIZONTAL);
+        root->Add(left, 0, wxEXPAND);
+        root->Add(right, 1, wxEXPAND);
+        SetSizer(root);
+
+        apply_defaults();
+        update_fields();
+        update_info();
+
+        m_param->Bind(wxEVT_CHOICE, &people_histogram_panel::on_param_changed, this);
+        m_mode->Bind(wxEVT_RADIOBOX, &people_histogram_panel::on_mode_changed, this);
+        build_button->Bind(wxEVT_BUTTON, &people_histogram_panel::on_build, this);
+        create_button->Bind(wxEVT_BUTTON, &people_histogram_panel::on_create_sample, this);
+    }
+
+    void set_on_people_added(std::function<void()> callback) { m_on_people_added = std::move(callback); }
+
+    void on_people_changed() {
+        update_info();
+        if (m_built && m_auto->GetValue()) build(false);
+    }
+
+private:
+    static constexpr double k_max_bins = 1000;
+
+    ArraySequence<person>* m_persons;
+    std::function<void()> m_on_people_added;
+
+    wxChoice* m_param;
+    wxRadioBox* m_mode;
+    wxTextCtrl *m_min, *m_max, *m_step, *m_bounds;
+    wxCheckBox* m_auto;
+    wxStaticText *m_info, *m_status;
+    chart_panel* m_chart;
+
+    std::unique_ptr<histogram<std::size_t>> m_hist;
+    bool m_built = false;
+
+    std::size_t value_of(const person& p) const {
+        if (m_param->GetSelection() == 1) {
+            const int year = wxDateTime(static_cast<time_t>(p.get_date())).GetYear();
+            return year > 0 ? static_cast<std::size_t>(year) : 0;
+        }
+        return p.get_age();
+    }
+
+    void apply_defaults() {
+        if (m_param->GetSelection() == 1) {
+            const int year = wxDateTime::GetCurrentYear();
+            m_min->SetValue("1900");
+            m_max->SetValue(wxString::Format("%d", year));
+            m_step->SetValue("10");
+            m_bounds->SetValue(wxString::Format("1900 1950 1980 2000 %d", year));
+        } else {
+            m_min->SetValue("0");
+            m_max->SetValue("100");
+            m_step->SetValue("10");
+            m_bounds->SetValue("0 18 30 45 60 100");
+        }
+    }
+
+    void update_fields() {
+        const bool equal = (m_mode->GetSelection() == 0);
+        m_min->Enable(equal);
+        m_max->Enable(equal);
+        m_step->Enable(equal);
+        m_bounds->Enable(!equal);
+    }
+
+    void update_info() {
+        m_info->SetLabel(to_utf8("Людей в списке: ") + size_to_str(m_persons->GetLength()));
+    }
+
+    void on_param_changed(wxCommandEvent&) {
+        apply_defaults();
+        m_built = false;
+    }
+
+    void on_mode_changed(wxCommandEvent&) {
+        update_fields();
+    }
+
+    void on_build(wxCommandEvent&) {
+        build(true);
+    }
+
+    bool passport_exists(std::size_t series, std::size_t number) const {
+        for (std::size_t i = 0; i < m_persons->GetLength(); ++i) {
+            person_id id = m_persons->Get(i).get_passport();
+            if (id.series == series && id.number == number) return true;
+        }
+        return false;
+    }
+
+    void on_create_sample(wxCommandEvent&) {
+        struct sample { const char* last; const char* first; const char* patr; int year; };
+        static const sample data[10] = {
+            {"Иванов",    "Иван",      "Иванович",     2001},
+            {"Петров",    "Пётр",      "Петрович",     1999},
+            {"Сидоров",   "Сидор",     "Сидорович",    1971},
+            {"Смирнов",   "Алексей",   "Андреевич",    1978},
+            {"Кузнецова", "Мария",     "Сергеевна",    1985},
+            {"Попов",     "Дмитрий",   "Николаевич",   1990},
+            {"Соколова",  "Анна",      "Игоревна",     1995},
+            {"Лебедев",   "Максим",    "Олегович",     2000},
+            {"Новикова",  "Екатерина", "Павловна",     2005},
+            {"Морозов",   "Артём",     "Владимирович", 2010},
+        };
+
+        try {
+            std::size_t added = 0;
+            for (std::size_t i = 0; i < 10; ++i) {
+                const std::size_t series = 9000 + i;
+                const std::size_t number = 100000 + i;
+                if (passport_exists(series, number)) continue;
+
+                const sample& s = data[i];
+                const wxDateTime birth(15, wxDateTime::Jun, s.year);
+                person p(person_id{series, number}, s.first, s.last, s.patr,
+                         static_cast<std::time_t>(birth.GetTicks()));
+                m_persons->Append(p);
+                ++added;
+            }
+
+            if (m_on_people_added) m_on_people_added();
+            update_info();
+
+            m_param->SetSelection(1);
+            m_mode->SetSelection(0);
+            m_min->SetValue("1950");
+            m_max->SetValue("2020");
+            m_step->SetValue("10");
+            m_bounds->SetValue("1950 1970 1990 2010 2020");
+            update_fields();
+            build(true);
+
+            m_status->SetLabel(to_utf8("Добавлено людей: ") + size_to_str(added) +
+                               to_utf8(". ") + m_status->GetLabel());
+        } catch (const exception& e) {
+            show_error(from_std(e.what()));
+        } catch (const std::exception& e) {
+            show_error(from_std(e.what()));
+        }
+    }
+
+    void fail(bool interactive, const wxString& text) {
+        if (interactive) show_error(text);
+        else m_status->SetLabel(text);
+    }
+
+    void build(bool interactive) {
+        try {
+            std::unique_ptr<histogram<std::size_t>> hist;
+
+            if (m_mode->GetSelection() == 0) {
+                std::size_t lo = 0, hi = 0, step = 0;
+                if (!parse_size(m_min->GetValue(), lo) ||
+                    !parse_size(m_max->GetValue(), hi) ||
+                    !parse_size(m_step->GetValue(), step)) {
+                    fail(interactive, to_utf8("Мин, макс и шаг должны быть неотрицательными целыми числами."));
+                    return;
+                }
+                if (!(lo < hi) || step == 0) {
+                    fail(interactive, to_utf8("Нужно: мин < макс и шаг > 0."));
+                    return;
+                }
+                if (std::ceil(double(hi - lo) / double(step)) > k_max_bins) {
+                    fail(interactive, to_utf8("Слишком много интервалов (максимум 1000)."));
+                    return;
+                }
+                hist = std::make_unique<histogram<std::size_t>>(
+                    histogram<std::size_t>::make_histogram(lo, hi, step));
+            } else {
+                ArraySequence<std::size_t> bounds;
+                wxString bad;
+                if (!parse_sizes(m_bounds->GetValue(), bounds, bad)) {
+                    fail(interactive, to_utf8("Не удалось разобрать число: ") + bad);
+                    return;
+                }
+                if (bounds.GetLength() > k_max_bins) {
+                    fail(interactive, to_utf8("Слишком много границ (максимум 1000)."));
+                    return;
+                }
+                hist = std::make_unique<histogram<std::size_t>>(
+                    histogram<std::size_t>::make_histogram(bounds));
+            }
+
+            std::size_t added = 0, skipped = 0;
+            for (std::size_t i = 0; i < m_persons->GetLength(); ++i) {
+                if (hist->add(value_of(m_persons->Get(i)))) ++added;
+                else ++skipped;
+            }
+
+            m_hist = std::move(hist);
+            m_built = true;
+            show_histogram();
+
+            wxString text = to_utf8("Учтено людей: ") + size_to_str(added);
+            if (skipped > 0) {
+                text += to_utf8(", вне диапазона (пропущено): ") + size_to_str(skipped);
+            }
+            m_status->SetLabel(text);
+        } catch (const exception& e) {
+            fail(interactive, from_std(e.what()));
+        } catch (const std::exception& e) {
+            fail(interactive, from_std(e.what()));
+        }
+    }
+
+    void show_histogram() {
+        ArraySequence<chart_panel::bar> bars;
+
+        if (!m_hist) {
+            m_chart->set_bars(bars);
+            return;
+        }
+
+        const selection_histogram<std::size_t>& sections = m_hist->get_selection();
+        const std::size_t n = sections.get_bin_count();
+
+        for (std::size_t i = 0; i < n; ++i) {
+            const range_statistic<std::size_t> stat = m_hist->get_bin(i);
+
+            chart_panel::bar b;
+            b.label = size_to_str(sections.get_lower(i));
+            b.count = stat.m_count;
+            bars.Append(b);
+        }
+
+        m_chart->set_bars(bars);
+    }
+};
+
+
 class main_frame : public wxFrame {
 public:
     main_frame() : wxFrame(nullptr, wxID_ANY, to_utf8("AVL: индекс людей и гистограмма"),
                            wxDefaultPosition, wxSize(1150, 760)) {
         auto* tabs = new wxNotebook(this, wxID_ANY);
-        tabs->AddPage(new people_panel(tabs), to_utf8("Люди"), true);
+
+        auto* people = new people_panel(tabs, &m_persons);
+        auto* people_hist = new people_histogram_panel(tabs, &m_persons);
+
+        people->set_on_changed([people_hist]() { people_hist->on_people_changed(); });
+        people_hist->set_on_people_added([people]() { people->refresh(); });
+
+        tabs->AddPage(people, to_utf8("Люди"), true);
         tabs->AddPage(new histogram_panel(tabs), to_utf8("Гистограмма"));
+        tabs->AddPage(people_hist, to_utf8("Гистограмма по людям"));
+
         CreateStatusBar();
         SetStatusText(to_utf8("Готово"));
         Centre();
     }
+
+private:
+    ArraySequence<person> m_persons; 
 };
 
 class app : public wxApp {
